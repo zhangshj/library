@@ -85,6 +85,18 @@ func TestNew_ValidConfig(t *testing.T) {
 	}
 }
 
+func TestNew_ModeAuto(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = ModeAuto
+	tr, err := New(cfg, WithAppID("test-appid"), WithAPIKey("test-api-key"), WithSecretKey("test-secret"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tr == nil {
+		t.Fatal("expected non-nil Translator")
+	}
+}
+
 func TestFunctionalOptions(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Timeout != translate.DefaultTimeout {
@@ -115,6 +127,11 @@ func TestFunctionalOptions(t *testing.T) {
 		t.Fatalf("expected mode %s, got %s", ModeLLM, cfg.Mode)
 	}
 
+	WithMode(ModeAuto)(cfg)
+	if cfg.Mode != ModeAuto {
+		t.Fatalf("expected mode %s, got %s", ModeAuto, cfg.Mode)
+	}
+
 	WithLLMAuth(LLMAuthSign)(cfg)
 	if cfg.LLMAuth != LLMAuthSign {
 		t.Fatalf("expected llm auth %s, got %s", LLMAuthSign, cfg.LLMAuth)
@@ -128,6 +145,49 @@ func TestFunctionalOptions(t *testing.T) {
 	WithReference("academic style")(cfg)
 	if cfg.Reference != "academic style" {
 		t.Fatalf("expected reference academic style, got %s", cfg.Reference)
+	}
+}
+
+func TestTranslate_Auto(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"from": "en",
+			"to":   "zh",
+			"trans_result": []map[string]string{
+				{"src": "hello", "dst": "你好"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	SetGeneralBaseURL(server.URL + "/api/trans/vip/translate")
+	SetLLMBaseURL(server.URL + "/ait/api/aiTextTranslate")
+	defer ResetURLs()
+
+	cfg := DefaultConfig()
+	cfg.Mode = ModeAuto
+	tr, err := New(cfg, WithAppID("test-appid"), WithAPIKey("test-api-key"), WithSecretKey("test-secret"))
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	tr.httpClient = &http.Client{
+		Timeout: DefaultTimeout,
+		Transport: &http.Transport{
+			Proxy: func(req *http.Request) (*url.URL, error) {
+				return url.Parse(server.URL)
+			},
+		},
+	}
+
+	result, err := tr.Translate(context.Background(), "hello", "en", "zh")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "你好" {
+		t.Fatalf("expected 你好, got %s", result)
 	}
 }
 
@@ -154,6 +214,56 @@ func TestTranslate_ContextCanceled(t *testing.T) {
 	_, err = tr.Translate(ctx, "hello", "en", "zh")
 	if err == nil {
 		t.Fatal("expected context canceled error")
+	}
+}
+
+func TestTranslateBatch_Auto(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"from": "en",
+			"to":   "zh",
+			"trans_result": []map[string]string{
+				{"src": "hello", "dst": "你好"},
+				{"src": "world", "dst": "世界"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	SetGeneralBaseURL(server.URL + "/api/trans/vip/translate")
+	SetLLMBaseURL(server.URL + "/ait/api/aiTextTranslate")
+	defer ResetURLs()
+
+	cfg := DefaultConfig()
+	cfg.Mode = ModeAuto
+	tr, err := New(cfg, WithAppID("test-appid"), WithAPIKey("test-api-key"), WithSecretKey("test-secret"))
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	tr.httpClient = &http.Client{
+		Timeout: DefaultTimeout,
+		Transport: &http.Transport{
+			Proxy: func(req *http.Request) (*url.URL, error) {
+				return url.Parse(server.URL)
+			},
+		},
+	}
+
+	results, err := tr.TranslateBatch(context.Background(), []string{"hello", "world"}, "en", "zh")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0] != "你好" {
+		t.Fatalf("expected 你好, got %s", results[0])
+	}
+	if results[1] != "世界" {
+		t.Fatalf("expected 世界, got %s", results[1])
 	}
 }
 

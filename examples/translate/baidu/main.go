@@ -12,7 +12,7 @@ import (
 func main() {
     ctx := context.Background()
     cfg := baidu.DefaultConfig()
-    cfg.Mode = "llm"
+    cfg.Mode = "auto"
     //cfg.APIKey = os.Getenv("BAIDU_APIKEY")
     cfg.LLMAuth = "sign"
     client, err := baidu.New(

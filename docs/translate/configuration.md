@@ -33,6 +33,7 @@ No default values or hardcoded secrets are provided in Config structs.
 | `APIKey` | `string` | Yes (via option) | — | **Sensitive — do not log** |
 | `SecretKey` | `string` | Yes (via option) | — | **Sensitive — do not log** |
 | `Mode` | `string` | No | `general` | Safe to log |
+|  |  |  |  | Valid values: `general`, `llm`, `auto`. |
 | `LLMAuth` | `string` | No | `bearer` | Safe to log |
 | `TermIDs` | `string` | No | — | Safe to log |
 | `Reference` | `string` | No | — | Safe to log |
@@ -44,7 +45,7 @@ No default values or hardcoded secrets are provided in Config structs.
 - `baidu.WithAppID(appID string)` — injects APPID at runtime (request body `appid`).
 - `baidu.WithAPIKey(apiKey string)` — injects API Key at runtime (used as Bearer token for LLM mode).
 - `baidu.WithSecretKey(secretKey string)` — injects Secret Key at runtime (used for sign generation).
-- `baidu.WithMode(mode string)` — sets translation mode: `general` (通用文本翻译) or `llm` (大模型文本翻译).
+- `baidu.WithMode(mode string)` — sets translation mode: `general` (通用文本翻译), `llm` (大模型文本翻译), or `auto` (randomly choose between the two).
 - `baidu.WithLLMAuth(auth string)` — sets LLM auth method: `bearer` (Bearer Token) or `sign` (MD5 sign).
 - `baidu.WithTermIDs(ids string)` — optional term base IDs for LLM translation.
 - `baidu.WithReference(ref string)` — optional custom translation instruction for LLM translation.
