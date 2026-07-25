@@ -1,0 +1,320 @@
+package tencent
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sashabaranov/go-openai"
+
+	"github.com/zhangshj/library/pkg/translate"
+)
+
+func TestNew_DefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	tr, err := New(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing credentials")
+	}
+	if tr != nil {
+		t.Fatal("expected nil Translator for invalid config")
+	}
+}
+
+func TestNew_MissingAPIKey(t *testing.T) {
+	cfg := DefaultConfig()
+	tr, err := New(cfg, WithAPIKey(""))
+	if err == nil {
+		t.Fatal("expected error for missing api key")
+	}
+	if tr != nil {
+		t.Fatal("expected nil Translator for invalid config")
+	}
+}
+
+func TestNew_ValidConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	tr, err := New(cfg, WithAPIKey("test-api-key"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tr == nil {
+		t.Fatal("expected non-nil Translator")
+	}
+}
+
+func TestFunctionalOptions(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Timeout != translate.DefaultTimeout {
+		t.Fatalf("expected default timeout %v, got %v", translate.DefaultTimeout, cfg.Timeout)
+	}
+	if cfg.Region != translate.DefaultRegion {
+		t.Fatalf("expected default region %s, got %s", translate.DefaultRegion, cfg.Region)
+	}
+	if cfg.Model != DefaultModel {
+		t.Fatalf("expected default model %s, got %s", DefaultModel, cfg.Model)
+	}
+	if cfg.BaseURL != DefaultBaseURL {
+		t.Fatalf("expected default base url %s, got %s", DefaultBaseURL, cfg.BaseURL)
+	}
+	if cfg.Separator != DefaultSeparator {
+		t.Fatalf("expected default separator %s, got %s", DefaultSeparator, cfg.Separator)
+	}
+
+	WithTimeout(10 * time.Second)(cfg)
+	if cfg.Timeout != 10*time.Second {
+		t.Fatalf("expected timeout 10s, got %v", cfg.Timeout)
+	}
+
+	WithRegion("ap-singapore")(cfg)
+	if cfg.Region != "ap-singapore" {
+		t.Fatalf("expected region ap-singapore, got %s", cfg.Region)
+	}
+
+	WithModel("custom-model")(cfg)
+	if cfg.Model != "custom-model" {
+		t.Fatalf("expected model custom-model, got %s", cfg.Model)
+	}
+
+	WithBaseURL("https://custom.example.com/v1")(cfg)
+	if cfg.BaseURL != "https://custom.example.com/v1" {
+		t.Fatalf("expected base url https://custom.example.com/v1, got %s", cfg.BaseURL)
+	}
+
+	WithSeparator("|||")(cfg)
+	if cfg.Separator != "|||" {
+		t.Fatalf("expected separator |||, got %s", cfg.Separator)
+	}
+}
+
+func TestResolveLangName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"zh", "中文"},
+		{"en", "英语"},
+		{"ja", "日语"},
+		{"unknown", "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := resolveLangName(tt.input)
+			if got != tt.want {
+				t.Fatalf("resolveLangName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTranslate_EmptyText(t *testing.T) {
+	tr, err := New(DefaultConfig(), WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	_, err = tr.Translate(context.Background(), "", "en", "zh")
+	if err == nil {
+		t.Fatal("expected error for empty text")
+	}
+}
+
+func TestTranslate_ContextCanceled(t *testing.T) {
+	tr, err := New(DefaultConfig(), WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = tr.Translate(ctx, "hello", "en", "zh")
+	if err == nil {
+		t.Fatal("expected context canceled error")
+	}
+}
+
+func TestTranslateBatch_EmptyTexts(t *testing.T) {
+	tr, err := New(DefaultConfig(), WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	_, err = tr.TranslateBatch(context.Background(), []string{""}, "en", "zh")
+	if err == nil {
+		t.Fatal("expected error for empty text")
+	}
+}
+
+func TestTranslateBatch_ContextCanceled(t *testing.T) {
+	tr, err := New(DefaultConfig(), WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = tr.TranslateBatch(ctx, []string{"hello"}, "en", "zh")
+	if err == nil {
+		t.Fatal("expected context canceled error")
+	}
+}
+
+func TestTranslateBatch_TableDriven(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func() (*Translator, error)
+		texts     []string
+		expectErr bool
+	}{
+		{
+			name: "missing credentials",
+			setup: func() (*Translator, error) {
+				return New(nil)
+			},
+			expectErr: true,
+		},
+		{
+			name: "empty text in batch",
+			setup: func() (*Translator, error) {
+				return New(DefaultConfig(), WithAPIKey("test-key"))
+			},
+			texts:     []string{"", "hello"},
+			expectErr: true,
+		},
+		{
+			name: "text contains separator",
+			setup: func() (*Translator, error) {
+				return New(DefaultConfig(), WithAPIKey("test-key"), WithSeparator("<SEP>"))
+			},
+			texts:     []string{"hello<SEP>world", "foo"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr, err := tt.setup()
+			if err != nil {
+				if !tt.expectErr {
+					t.Fatalf("unexpected setup error: %v", err)
+				}
+				return
+			}
+			_, err = tr.TranslateBatch(context.Background(), tt.texts, "en", "zh")
+			if tt.expectErr && err == nil {
+				t.Fatal("expected error but got nil")
+			}
+			if !tt.expectErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestTranslateBatch_Success(t *testing.T) {
+	var callCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		decoder := json.NewDecoder(r.Body)
+		var req openai.ChatCompletionRequest
+		_ = decoder.Decode(&req)
+
+		content := req.Messages[0].Content
+		parts := strings.Split(content, "<SEP>")
+		translatedParts := make([]string, len(parts))
+		for i, part := range parts {
+			if strings.Contains(part, "hello") {
+				translatedParts[i] = "你好"
+			} else if strings.Contains(part, "world") {
+				translatedParts[i] = "世界"
+			} else {
+				translatedParts[i] = part
+			}
+		}
+
+		resp := openai.ChatCompletionResponse{
+			Choices: []openai.ChatCompletionChoice{
+				{
+					Message: openai.ChatCompletionMessage{
+						Content: strings.Join(translatedParts, "<SEP>"),
+					},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	cfg := DefaultConfig()
+	cfg.BaseURL = server.URL + "/"
+	tr, err := New(cfg, WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	results, err := tr.TranslateBatch(context.Background(), []string{"hello", "world"}, "en", "zh")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0] != "你好" {
+		t.Fatalf("expected 你好, got %s", results[0])
+	}
+	if results[1] != "世界" {
+		t.Fatalf("expected 世界, got %s", results[1])
+	}
+}
+
+func TestErrorWrapping(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func() (*Translator, error)
+		text      string
+		src       string
+		dst       string
+		expectErr bool
+	}{
+		{
+			name: "missing credentials",
+			setup: func() (*Translator, error) {
+				return New(nil)
+			},
+			expectErr: true,
+		},
+		{
+			name: "empty text",
+			setup: func() (*Translator, error) {
+				return New(DefaultConfig(), WithAPIKey("test-key"))
+			},
+			text:     "",
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr, err := tt.setup()
+			if err != nil {
+				if !tt.expectErr {
+					t.Fatalf("unexpected setup error: %v", err)
+				}
+				return
+			}
+			_, err = tr.Translate(context.Background(), tt.text, tt.src, tt.dst)
+			if tt.expectErr && err == nil {
+				t.Fatal("expected error but got nil")
+			}
+			if !tt.expectErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
