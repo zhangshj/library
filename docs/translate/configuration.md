@@ -25,20 +25,51 @@ No default values or hardcoded secrets are provided in Config structs.
 - `aliyun.WithTimeout(d time.Duration)` — overrides HTTP timeout.
 - `aliyun.WithRegion(region string)` — overrides target cloud region.
 
+## Baidu Translate Config (`pkg/translate/baidu/config.go`)
+
+| Name | Type | Required | Default | Security |
+| --- | --- | --- | --- | --- |
+| `AppID` | `string` | Yes (via option) | — | **Sensitive — do not log** |
+| `APIKey` | `string` | Yes (via option) | — | **Sensitive — do not log** |
+| `SecretKey` | `string` | Yes (via option) | — | **Sensitive — do not log** |
+| `Mode` | `string` | No | `general` | Safe to log |
+| `LLMAuth` | `string` | No | `bearer` | Safe to log |
+| `TermIDs` | `string` | No | — | Safe to log |
+| `Reference` | `string` | No | — | Safe to log |
+| `Timeout` | `time.Duration` | No | `10s` | Safe to log |
+| `Region` | `string` | No | `cn-hangzhou` | Safe to log |
+
+### Functional Options
+
+- `baidu.WithAppID(appID string)` — injects APPID at runtime (request body `appid`).
+- `baidu.WithAPIKey(apiKey string)` — injects API Key at runtime (used as Bearer token for LLM mode).
+- `baidu.WithSecretKey(secretKey string)` — injects Secret Key at runtime (used for sign generation).
+- `baidu.WithMode(mode string)` — sets translation mode: `general` (通用文本翻译) or `llm` (大模型文本翻译).
+- `baidu.WithLLMAuth(auth string)` — sets LLM auth method: `bearer` (Bearer Token) or `sign` (MD5 sign).
+- `baidu.WithTermIDs(ids string)` — optional term base IDs for LLM translation.
+- `baidu.WithReference(ref string)` — optional custom translation instruction for LLM translation.
+- `baidu.WithTimeout(d time.Duration)` — overrides HTTP timeout.
+- `baidu.WithRegion(region string)` — kept for compatibility, not used by Baidu APIs.
+
 ## Tencent Cloud Config (`pkg/translate/tencent/config.go`)
 
 | Name | Type | Required | Default | Security |
 | --- | --- | --- | --- | --- |
-| `SecretID` | `string` | Yes (via option) | — | **Sensitive — do not log** |
-| `SecretKey` | `string` | Yes (via option) | — | **Sensitive — do not log** |
+| `APIKey` | `string` | Yes (via option) | — | **Sensitive — do not log** |
+| `Model` | `string` | No | `hy-mt2-plus` | Safe to log |
+| `BaseURL` | `string` | No | `https://tokenhub.tencentmaas.com/v1` | Safe to log |
+| `Separator` | `string` | No | `<SEP>` | Safe to log |
 | `Timeout` | `time.Duration` | No | `5s` | Safe to log |
 | `Region` | `string` | No | `cn-hangzhou` | Safe to log |
 
 ### Functional Options
 
-- `tencent.WithSecretKey(id, key string)` — injects credentials at runtime.
+- `tencent.WithAPIKey(apiKey string)` — injects TokenHub API Key at runtime.
+- `tencent.WithModel(model string)` — overrides translation model name.
+- `tencent.WithBaseURL(url string)` — overrides TokenHub API base URL.
+- `tencent.WithSeparator(sep string)` — overrides separator for batch translation.
 - `tencent.WithTimeout(d time.Duration)` — overrides HTTP timeout.
-- `tencent.WithRegion(region string)` — overrides target cloud region.
+- `tencent.WithRegion(region string)` — kept for compatibility, not used by TokenHub.
 
 ## Security Recommendations
 

@@ -4,7 +4,7 @@
 
 - **Driver portability**: business code depends only on `Translator` interface, not on any cloud SDK.
 - **Credential isolation**: secrets are injected at runtime via Functional Options, never stored in serializable configs.
-- **Parallel evolution**: Alibaba Cloud and Tencent Cloud drivers evolve independently without cross-dependencies.
+- **Parallel evolution**: Alibaba Cloud, Baidu Translate, and Tencent Cloud drivers evolve independently without cross-dependencies.
 
 ## Structure
 
@@ -14,8 +14,10 @@ pkg/translate/
 ├── config.go           # Shared, non-sensitive defaults
 ├── aliyun/
 │   └── aliyun.go       # Alibaba Cloud alimt implementation
+├── baidu/
+│   └── baidu.go        # Baidu Translate implementation (General + LLM)
 ├── tencent/
-│   └── tencent.go      # Tencent Cloud TMT implementation
+│   └── tencent.go      # Tencent Cloud TokenHub implementation
 └── mock/
     └── mock.go         # In-memory mock for testing and demos
 ```
@@ -35,11 +37,13 @@ pkg/translate/
 ## Batch Translation Strategy
 
 - **Alibaba Cloud**: Uses the native `GetBatchTranslate` API, which sends all texts in a single HTTP request. This avoids per-request rate limits and is the most efficient approach.
-- **Tencent Cloud**: Uses concurrent individual `TextTranslate` calls with bounded parallelism (default 5 goroutines). Tencent's TMT SDK does not provide a native batch API, so concurrency is used to amortize latency while respecting rate limits via semaphore-based throttling.
+- **Baidu Translate (General)**: Uses `\n` to join all texts into a single `q` parameter, sending one API call. The response returns an array of `trans_result` preserving input order.
+- **Baidu Translate (LLM)**: Uses `\n` to join all texts into a single `q` parameter, sending one API call for both Bearer and Sign auth modes. The response returns an array of `trans_result` preserving input order.
+- **Tencent Cloud TokenHub**: Uses `<SEP>` separator to join all texts into a single prompt, sending one Chat Completions API call. The response is split back into individual results preserving input order.
 
 ## Extension Points
 
-To add a new cloud provider (e.g., Baidu Translate):
+To add a new cloud provider (e.g., Google Translate):
 
 1. Create `pkg/translate/<provider>/<provider>.go`
 2. Implement `translate.Translator`

@@ -34,6 +34,7 @@
 - `{module}/getting_started.md`：3~5 行代码能跑的最小 Demo。
 - `{module}/configuration.md`：用 Markdown 表格列清该模块所有配置项（名称、类型、是否必填、默认值、安全建议）。
 - `{module}/architecture.md`：简述设计思路（如为什么要做分块封装）。
+- **文档同步约束**：技术方案变更后，文档必须同步更新为新的内容。禁止文档与代码实现不一致。
 
 ### 4.2 示例要求
 - `examples/{module}/` 下的代码必须是可以直接 `go run` 的独立文件。

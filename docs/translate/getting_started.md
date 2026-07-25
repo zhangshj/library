@@ -1,6 +1,6 @@
 # Translate Component
 
-Unified machine translation interface backed by Alibaba Cloud and Tencent Cloud.
+Unified machine translation interface backed by Alibaba Cloud, Baidu Translate, and Tencent Cloud TokenHub.
 
 ## Quick Start
 
@@ -11,9 +11,11 @@ import (
     "context"
     "fmt"
     "log"
+    "os"
 
     "github.com/zhangshj/library/pkg/translate"
     "github.com/zhangshj/library/pkg/translate/aliyun"
+    "github.com/zhangshj/library/pkg/translate/baidu"
     "github.com/zhangshj/library/pkg/translate/tencent"
 )
 
@@ -35,18 +37,27 @@ func main() {
         fmt.Println("aliyun:", aliResult)
     }
 
-    // Alibaba Cloud - batch translation (single API call, avoids rate limits)
-    aliResults, err := aliTr.TranslateBatch(ctx, []string{"Hello", "World"}, "en", "zh")
+    // Baidu Translate - General mode, batch translation with newline-joined single API call
+    baiduTr, err := baidu.New(
+        translate.DefaultConfig(),
+        baidu.WithAppID("your-appid"),
+        baidu.WithAPIKey("your-api-key"),
+        baidu.WithSecretKey("your-secret-key"),
+    )
     if err != nil {
-        log.Println("aliyun batch translate failed:", err)
+        log.Fatal(err)
+    }
+    baiduResults, err := baiduTr.TranslateBatch(ctx, []string{"Hello", "World"}, "en", "zh")
+    if err != nil {
+        log.Println("baidu batch translate failed:", err)
     } else {
-        fmt.Println("aliyun batch:", aliResults)
+        fmt.Println("baidu batch:", baiduResults)
     }
 
-    // Tencent Cloud - single text translation
+    // Tencent Cloud TokenHub - single text translation
     tenTr, err := tencent.New(
         translate.DefaultConfig(),
-        tencent.WithSecretKey("your-secret-id", "your-secret-key"),
+        tencent.WithAPIKey(os.Getenv("TOKENHUB_API_KEY")),
     )
     if err != nil {
         log.Fatal(err)
@@ -56,14 +67,6 @@ func main() {
         log.Println("tencent translate failed:", err)
     } else {
         fmt.Println("tencent:", tenResult)
-    }
-
-    // Tencent Cloud - batch translation (concurrent with bounded parallelism)
-    tenResults, err := tenTr.TranslateBatch(ctx, []string{"Hello", "World"}, "en", "zh")
-    if err != nil {
-        log.Println("tencent batch translate failed:", err)
-    } else {
-        fmt.Println("tencent batch:", tenResults)
     }
 }
 ```
