@@ -57,10 +57,11 @@ var langName = map[string]string{
 // Config holds TokenHub specific configuration.
 type Config struct {
 	translate.Config
-	APIKey     string
-	Model      string
-	BaseURL    string
-	Separator  string
+	APIKey    string
+	Model     string
+	BaseURL   string
+	Separator string
+	Domain    string
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -110,6 +111,14 @@ func WithSeparator(separator string) Option {
 	}
 }
 
+// WithDomain sets the professional domain for translation (e.g. "智能驾驶", "机器人", "生物医疗").
+// When empty, no domain-specific instruction is added to the prompt.
+func WithDomain(domain string) Option {
+	return func(c *Config) {
+		c.Domain = domain
+	}
+}
+
 // WithTimeout sets the HTTP timeout.
 func WithTimeout(timeout time.Duration) Option {
 	return func(c *Config) {
@@ -129,6 +138,7 @@ type Translator struct {
 	client    *openai.Client
 	model     string
 	separator string
+	domain    string
 }
 
 // New creates a new TokenHub Translator.
@@ -159,7 +169,7 @@ func New(cfg *Config, opts ...Option) (*Translator, error) {
 		separator = DefaultSeparator
 	}
 
-	return &Translator{client: client, model: model, separator: separator}, nil
+	return &Translator{client: client, model: model, separator: separator, domain: cfg.Domain}, nil
 }
 
 // resolveLangName converts an ISO 639-1 code to the Chinese language name expected by TokenHub.
@@ -178,7 +188,11 @@ func (t *Translator) Translate(ctx context.Context, text string, sourceLang, tar
 	}
 
 	targetLangName := resolveLangName(targetLang)
-	prompt := fmt.Sprintf("将以下文本翻译为 %s，注意只需要输出翻译后的结果，不要额外解释：%s", targetLangName, text)
+	domainHint := ""
+	if t.domain != "" {
+		domainHint = fmt.Sprintf("请使用%s领域的专业术语和表达方式。", t.domain)
+	}
+	prompt := fmt.Sprintf("将以下文本翻译为 %s，%s注意只需要输出翻译后的结果，不要额外解释：%s", targetLangName, domainHint, text)
 
 	resp, err := t.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: t.model,
@@ -214,8 +228,12 @@ func (t *Translator) TranslateBatch(ctx context.Context, texts []string, sourceL
 	}
 
 	targetLangName := resolveLangName(targetLang)
+	domainHint := ""
+	if t.domain != "" {
+		domainHint = fmt.Sprintf("请使用%s领域的专业术语和表达方式。", t.domain)
+	}
 	sourceText := strings.Join(texts, t.separator)
-	prompt := fmt.Sprintf("请将以下文本准确翻译为 %s。你必须在译文中保留等量的分隔符，绝对不可遗漏、转义或翻译该符号，并注意分隔符的位置。%s", targetLangName, sourceText)
+	prompt := fmt.Sprintf("请将以下文本准确翻译为 %s。%s你必须在译文中保留等量的分隔符，绝对不可遗漏、转义或翻译该符号，并注意分隔符的位置。%s", targetLangName, domainHint, sourceText)
 
 	resp, err := t.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: t.model,
