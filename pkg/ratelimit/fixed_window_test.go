@@ -53,17 +53,17 @@ func TestIncr_ExceedsAfterMax(t *testing.T) {
 	s := newFakeStore()
 	l := New(s, Config{Window: time.Minute, MaxHits: 3})
 
-	// hits 1,2,3 -> allowed (<=max)
-	for i := int64(1); i <= 3; i++ {
+	// hits 1,2 -> allowed (under max)
+	for i := int64(1); i <= 2; i++ {
 		ok, err := l.Incr(context.Background(), "u:alice")
 		if !ok || err != nil {
 			t.Fatalf("hit %d should be allowed, got allowed=%v err=%v", i, ok, err)
 		}
 	}
-	// hit 4 -> exceeded
+	// hit 3 -> reaches max, blocked (and banned)
 	ok, err := l.Incr(context.Background(), "u:alice")
 	if ok {
-		t.Fatalf("4th hit should be blocked")
+		t.Fatalf("3rd hit (reaching max) should be blocked")
 	}
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -94,36 +94,36 @@ func TestReset_ClearsCounter(t *testing.T) {
 	}
 }
 
-// TestBan_StartsOnlyAfterExceeding verifies the desired semantics:
+// TestBan_StartsOnReachingLimit verifies the desired semantics:
 //   - counting uses Window as TTL
-//   - a ban entry (ban:<key>) is created ONLY when the counter first exceeds
-//     MaxHits, and Check rejects while the ban entry lives (independent of the
-//     counting window).
-func TestBan_StartsOnlyAfterExceeding(t *testing.T) {
+//   - a ban entry (ban:<key>) is created when the counter REACHES MaxHits (the
+//     failing request that exhausts the quota triggers the ban), and Check
+//     rejects while the ban entry lives (independent of the counting window).
+func TestBan_StartsOnReachingLimit(t *testing.T) {
 	s := newFakeStore()
 	l := New(s, Config{Window: time.Minute, MaxHits: 5, BanDuration: 5 * time.Minute})
 
-	// 5 failures under the limit -> still allowed, NO ban entry yet.
-	for i := int64(1); i <= 5; i++ {
+	// First 4 failures: still allowed, NO ban entry yet.
+	for i := int64(1); i <= 4; i++ {
 		ok, err := l.Incr(context.Background(), "u:eve")
 		if !ok || err != nil {
 			t.Fatalf("failure %d should be allowed, got allowed=%v err=%v", i, ok, err)
 		}
 	}
 	if _, exists := s.m[banKey("u:eve")]; exists {
-		t.Fatalf("ban entry must NOT exist before the limit is exceeded")
+		t.Fatalf("ban entry must NOT exist before the limit is reached")
 	}
 
-	// 6th failure -> exceeds limit, ban entry created, request rejected.
+	// 5th failure -> reaches MaxHits, ban entry created, request rejected.
 	ok, err := l.Incr(context.Background(), "u:eve")
 	if ok {
-		t.Fatalf("6th failure should be blocked")
+		t.Fatalf("5th failure (reaching limit) should be blocked")
 	}
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if _, exists := s.m[banKey("u:eve")]; !exists {
-		t.Fatalf("ban entry must exist after exceeding the limit")
+		t.Fatalf("ban entry must exist after reaching the limit")
 	}
 	if s.ttl[banKey("u:eve")] != 5*time.Minute {
 		t.Fatalf("ban ttl should be BanDuration (5m), got %v", s.ttl[banKey("u:eve")])
@@ -165,8 +165,8 @@ func TestCheck_StoreErrorReturnsUnavailable(t *testing.T) {
 func TestNew_AppliesDefaults(t *testing.T) {
 	s := newFakeStore()
 	l := New(s, Config{}) // zero config -> defaults
-	// defaults: window=1m, maxHits=5 -> 5 allowed, 6th blocked
-	for i := int64(1); i <= DefaultMaxHits; i++ {
+	// defaults: window=1m, maxHits=5 -> 4 allowed, 5th (reaching max) blocked
+	for i := int64(1); i <= DefaultMaxHits-1; i++ {
 		ok, err := l.Incr(context.Background(), "k")
 		if !ok || err != nil {
 			t.Fatalf("default hit %d should be allowed", i)
@@ -174,6 +174,6 @@ func TestNew_AppliesDefaults(t *testing.T) {
 	}
 	ok, _ := l.Incr(context.Background(), "k")
 	if ok {
-		t.Fatalf("default max+1 should be blocked")
+		t.Fatalf("default max hit should be blocked")
 	}
 }

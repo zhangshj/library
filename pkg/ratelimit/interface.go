@@ -86,18 +86,22 @@ func (l *Limiter) Check(ctx context.Context, key string) (allowed bool, err erro
 // is still allowed. allowed=false means the request should be rejected.
 //
 // Counting uses Window as the counter TTL (fixed-window semantics, so the
-// window length still matters). When the counter first exceeds maxHits, a
-// separate ban entry (ban:<key>) is set with TTL BanDuration, starting the
-// ban clock at the moment of exceeding the limit — NOT at the first failure.
-// The counter key is left in place (it naturally expires via Window) while the
-// ban entry governs rejection until BanDuration elapses.
+// window length still matters). When the counter reaches maxHits (i.e. the
+// failing request has exhausted the quota), a separate ban entry (ban:<key>)
+// is set with TTL BanDuration, starting the ban clock at that moment — NOT at
+// the first failure. The counter key is left in place (it naturally expires via
+// Window) while the ban entry governs rejection until BanDuration elapses.
+//
+// Note: Check rejects once n >= maxHits, so the request that brings the count
+// to maxHits is the one that triggers the ban here (>=, not >). This closes the
+// gap where a caller would be rate-limited but never actually banned.
 func (l *Limiter) Incr(ctx context.Context, key string) (allowed bool, err error) {
 	n, err := l.store.Incr(ctx, key, l.window)
 	if err != nil {
 		l.alert(err)
 		return false, ErrStoreUnavailable
 	}
-	if n > l.maxHits {
+	if n >= l.maxHits {
 		if berr := l.store.Set(ctx, banKey(key), l.banDuration); berr != nil {
 			l.alert(berr)
 			return false, ErrStoreUnavailable
