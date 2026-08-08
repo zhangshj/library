@@ -24,6 +24,12 @@ func (f *fakeStore) Incr(_ context.Context, key string, ttl time.Duration) (int6
 	return f.m[key], nil
 }
 
+func (f *fakeStore) Set(_ context.Context, key string, ttl time.Duration) error {
+	f.m[key] = 1
+	f.ttl[key] = ttl
+	return nil
+}
+
 func (f *fakeStore) Get(_ context.Context, key string) (int64, error) {
 	return f.m[key], nil
 }
@@ -88,10 +94,63 @@ func TestReset_ClearsCounter(t *testing.T) {
 	}
 }
 
+// TestBan_StartsOnlyAfterExceeding verifies the desired semantics:
+//   - counting uses Window as TTL
+//   - a ban entry (ban:<key>) is created ONLY when the counter first exceeds
+//     MaxHits, and Check rejects while the ban entry lives (independent of the
+//     counting window).
+func TestBan_StartsOnlyAfterExceeding(t *testing.T) {
+	s := newFakeStore()
+	l := New(s, Config{Window: time.Minute, MaxHits: 5, BanDuration: 5 * time.Minute})
+
+	// 5 failures under the limit -> still allowed, NO ban entry yet.
+	for i := int64(1); i <= 5; i++ {
+		ok, err := l.Incr(context.Background(), "u:eve")
+		if !ok || err != nil {
+			t.Fatalf("failure %d should be allowed, got allowed=%v err=%v", i, ok, err)
+		}
+	}
+	if _, exists := s.m[banKey("u:eve")]; exists {
+		t.Fatalf("ban entry must NOT exist before the limit is exceeded")
+	}
+
+	// 6th failure -> exceeds limit, ban entry created, request rejected.
+	ok, err := l.Incr(context.Background(), "u:eve")
+	if ok {
+		t.Fatalf("6th failure should be blocked")
+	}
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if _, exists := s.m[banKey("u:eve")]; !exists {
+		t.Fatalf("ban entry must exist after exceeding the limit")
+	}
+	if s.ttl[banKey("u:eve")] != 5*time.Minute {
+		t.Fatalf("ban ttl should be BanDuration (5m), got %v", s.ttl[banKey("u:eve")])
+	}
+
+	// Check must reject while banned, regardless of the counter window.
+	if ok, _ := l.Check(context.Background(), "u:eve"); ok {
+		t.Fatalf("banned key should be rejected by Check")
+	}
+
+	// Reset clears both counter and ban, restoring access.
+	if err := l.Reset(context.Background(), "u:eve"); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := s.m[banKey("u:eve")]; exists {
+		t.Fatalf("Reset must clear the ban entry")
+	}
+	if ok, _ := l.Check(context.Background(), "u:eve"); !ok {
+		t.Fatalf("after Reset should be allowed again")
+	}
+}
+
 // errStore simulates a dead Redis to verify fail-open caller behaviour.
 type errStore struct{ err error }
 
 func (e errStore) Incr(context.Context, string, time.Duration) (int64, error) { return 0, e.err }
+func (e errStore) Set(context.Context, string, time.Duration) error         { return e.err }
 func (e errStore) Get(context.Context, string) (int64, error)                { return 0, e.err }
 func (e errStore) Del(context.Context, string) error                        { return e.err }
 

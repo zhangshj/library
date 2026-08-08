@@ -51,6 +51,11 @@ func (s *RedisStore) Get(ctx context.Context, key string) (int64, error) {
 	return n, nil
 }
 
+// Set unconditionally stores key with ttl (overwrites any existing value/TTL).
+func (s *RedisStore) Set(ctx context.Context, key string, ttl time.Duration) error {
+	return s.cli.Set(ctx, key, "1", ttl).Err()
+}
+
 // Del removes key.
 func (s *RedisStore) Del(ctx context.Context, key string) error {
 	return s.cli.Del(ctx, key).Err()

@@ -3,7 +3,7 @@
 Framework-agnostic, fixed-window rate limiter with pluggable storage. The core
 algorithm depends only on the `Store` interface, so it is testable with an
 in-memory fake and production-ready with the bundled Redis backend
-(atomic `INCR` + `EXPIRE` via Lua).
+(atomic `INCR` + `EXPIRE` via Lua, `Set` via native `SET ... EX`).
 
 Designed for login/CheckLogin brute-force protection: **count only failures**,
 **fail-open on store errors** (login availability > brute-force protection).
@@ -27,10 +27,12 @@ func main() {
 
 	// In-memory store: tests, or fallback when no Redis is configured.
 	store := ratelimit.NewMemoryStore(nil)
-	// 5 failures allowed per minute; on store error, call the alert hook.
+	// 3 failures allowed per 5-minute window; after exceeding, the key is
+	// banned for 10 minutes (BanDuration). On store error, call the alert hook.
 	limiter := ratelimit.New(store, ratelimit.Config{
-		Window: time.Minute,
-		MaxHits: 5,
+		Window:      5 * time.Minute,
+		MaxHits:     3,
+		BanDuration: 10 * time.Minute,
 		OnStoreErr: func(err error) {
 			log.Printf("ratelimit store error (fail-open): %v", err)
 		},
@@ -54,10 +56,17 @@ func main() {
 
 	if !passwordOK {
 		// Only failures consume the quota.
-		if _, err := limiter.Incr(ctx, key); err != nil {
+		allowed, err = limiter.Incr(ctx, key)
+		if err == ratelimit.ErrStoreUnavailable {
+			// fail-open on incr error
 			log.Printf("incr failed (fail-open): %v", err)
+			allowed = true
 		}
-		fmt.Println("bad password, attempt counted")
+		if !allowed {
+			fmt.Println("limit exceeded, now banned")
+		} else {
+			fmt.Println("bad password, attempt counted")
+		}
 		return
 	}
 
@@ -83,12 +92,25 @@ var client redis.UniversalClient
 
 store := ratelimit.NewRedisStore(client)
 limiter := ratelimit.New(store, ratelimit.Config{
-	Window:  time.Minute,
-	MaxHits: 5,
+	Window:      5 * time.Minute,
+	MaxHits:     3,
+	BanDuration: 10 * time.Minute,
 })
 // same Check/Incr/Reset API as above
 ```
 
+## Direct Ban via Store.Set
+
+`Store.Set` writes a key with a TTL directly, independent of the counter.
+Use it for admin-initiated bans or anomaly detection:
+
+```go
+// Ban a user for 2 hours without touching the failure counter.
+if err := store.Set(ctx, "login:user:alice", 2*time.Hour); err != nil {
+	log.Printf("set ban failed: %v", err)
+}
+```
+
 See [configuration.md](configuration.md) for all options and
 [architecture.md](architecture.md) for the design rationale (why fixed-window,
-why fail-open, how the Lua atomicity works).
+why fail-open, how ban duration decouples from window).

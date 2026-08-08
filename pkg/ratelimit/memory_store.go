@@ -41,6 +41,15 @@ func (s *MemoryStore) Get(_ context.Context, key string) (int64, error) {
 	return s.m[key], nil
 }
 
+// Set unconditionally stores key with ttl (overwrites any existing value/TTL).
+func (s *MemoryStore) Set(_ context.Context, key string, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[key] = 1
+	s.ttl[key] = ttl
+	return nil
+}
+
 // Del removes key.
 func (s *MemoryStore) Del(_ context.Context, key string) error {
 	s.mu.Lock()

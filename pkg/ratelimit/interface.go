@@ -22,6 +22,10 @@ type Store interface {
 	// If the key already existed, ttl is ignored (sliding window start is fixed).
 	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
 
+	// Set unconditionally stores key with the given ttl (overwriting any
+	// existing value/TTL). Used to start a ban independent of the counter.
+	Set(ctx context.Context, key string, ttl time.Duration) error
+
 	// Get returns the current counter value for key (0 if missing).
 	Get(ctx context.Context, key string) (int64, error)
 
@@ -29,12 +33,18 @@ type Store interface {
 	Del(ctx context.Context, key string) error
 }
 
+// banKey prefixes the counter key to produce the dedicated ban key.
+// A counter that exceeds maxHits triggers a separate ban entry with its own
+// TTL (BanDuration), decoupled from the counting window.
+func banKey(key string) string { return "ban:" + key }
+
 // Limiter enforces a fixed-window limit for a logical bucket identified by key.
 type Limiter struct {
-	store    Store
-	window   time.Duration
-	maxHits  int64
-	onStoreErr func(error) // optional hook for alerting on store failures
+	store       Store
+	window      time.Duration
+	banDuration time.Duration
+	maxHits     int64
+	onStoreErr  func(error) // optional hook for alerting on store failures
 }
 
 // New constructs a Limiter. Zero-valued Config fields fall back to defaults
@@ -42,16 +52,28 @@ type Limiter struct {
 func New(store Store, cfg Config) *Limiter {
 	cfg = cfg.normalized()
 	return &Limiter{
-		store:      store,
-		window:     cfg.Window,
-		maxHits:    cfg.MaxHits,
-		onStoreErr: cfg.OnStoreErr,
+		store:       store,
+		window:      cfg.Window,
+		banDuration: cfg.BanDuration,
+		maxHits:     cfg.MaxHits,
+		onStoreErr:  cfg.OnStoreErr,
 	}
 }
 
-// Check reports whether key is still under the limit WITHOUT incrementing.
-// It returns allowed=true when the current count is below maxHits.
+// Check reports whether key is still allowed WITHOUT incrementing.
+// A key is rejected when either:
+//   - it is currently banned (a ban:<key> entry exists, set when the limit was
+//     exceeded, with TTL BanDuration and independent of the counting window), or
+//   - its current failure count has reached maxHits.
 func (l *Limiter) Check(ctx context.Context, key string) (allowed bool, err error) {
+	banned, berr := l.store.Get(ctx, banKey(key))
+	if berr != nil {
+		l.alert(berr)
+		return false, ErrStoreUnavailable
+	}
+	if banned > 0 {
+		return false, nil
+	}
 	n, err := l.store.Get(ctx, key)
 	if err != nil {
 		l.alert(err)
@@ -60,20 +82,39 @@ func (l *Limiter) Check(ctx context.Context, key string) (allowed bool, err erro
 	return n < l.maxHits, nil
 }
 
-// Incr increments the failure counter for key and returns whether the limit
-// is now exceeded. allowed=false means the caller should reject the request.
+// Incr increments the failure counter for key and returns whether the caller
+// is still allowed. allowed=false means the request should be rejected.
+//
+// Counting uses Window as the counter TTL (fixed-window semantics, so the
+// window length still matters). When the counter first exceeds maxHits, a
+// separate ban entry (ban:<key>) is set with TTL BanDuration, starting the
+// ban clock at the moment of exceeding the limit — NOT at the first failure.
+// The counter key is left in place (it naturally expires via Window) while the
+// ban entry governs rejection until BanDuration elapses.
 func (l *Limiter) Incr(ctx context.Context, key string) (allowed bool, err error) {
 	n, err := l.store.Incr(ctx, key, l.window)
 	if err != nil {
 		l.alert(err)
 		return false, ErrStoreUnavailable
 	}
-	return n <= l.maxHits, nil
+	if n > l.maxHits {
+		if berr := l.store.Set(ctx, banKey(key), l.banDuration); berr != nil {
+			l.alert(berr)
+			return false, ErrStoreUnavailable
+		}
+		return false, nil
+	}
+	return true, nil
 }
 
-// Reset clears the counter for key (called after a successful authentication).
+// Reset clears the counter AND any active ban for key (called after a
+// successful authentication, so a legitimate user is never held by a stale ban).
 func (l *Limiter) Reset(ctx context.Context, key string) error {
 	if err := l.store.Del(ctx, key); err != nil {
+		l.alert(err)
+		return ErrStoreUnavailable
+	}
+	if err := l.store.Del(ctx, banKey(key)); err != nil {
 		l.alert(err)
 		return ErrStoreUnavailable
 	}

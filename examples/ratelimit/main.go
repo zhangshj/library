@@ -1,6 +1,7 @@
 // Command ratelimit-demo demonstrates the full lifecycle of the ratelimit
 // component: build config -> initialize store + limiter -> normal calls
-// (Check / Incr / Reset) -> error handling (fail-open on store error).
+// (Check / Incr / Reset) -> ban behavior (exceeding limit triggers a ban
+// with independent BanDuration) -> error handling (fail-open on store error).
 //
 // Run with: go run ./examples/ratelimit
 //
@@ -23,9 +24,13 @@ func main() {
 	ctx := context.Background()
 
 	// 1) Read config (in real code this comes from your YAML/env loader).
+	//    BanDuration is how long a key stays banned AFTER the limit is hit.
+	//    When zero it falls back to Window, preserving the old "window == ban"
+	//    behaviour.
 	cfg := ratelimit.Config{
-		Window:  time.Minute,
-		MaxHits: 5,
+		Window:      5 * time.Minute,
+		MaxHits:     3,
+		BanDuration: 10 * time.Minute,
 		OnStoreErr: func(err error) {
 			// 2) Error hook: alert, but never block the request path.
 			log.Printf("[alert] ratelimit store error (fail-open): %v", err)
@@ -39,7 +44,7 @@ func main() {
 
 	key := "login:user:alice"
 
-	// 4) Normal call path: simulate 5 login attempts, success on the 5th.
+	// 4) Normal call path: simulate failures up to MaxHits.
 	for attempt := 1; attempt <= 5; attempt++ {
 		allowed, err := limiter.Check(ctx, key)
 		if err == ratelimit.ErrStoreUnavailable {
@@ -47,18 +52,20 @@ func main() {
 			allowed = true
 		}
 		if !allowed {
-			fmt.Printf("attempt %d: BLOCKED (too many failures)\n", attempt)
+			fmt.Printf("attempt %d: BLOCKED (already banned or over limit)\n", attempt)
 			continue
 		}
 
 		// Pretend the password check happens here.
-		passwordOK := attempt == 5 // succeed on the 5th (within the quota)
+		passwordOK := false
 		if !passwordOK {
-			if _, incrErr := limiter.Incr(ctx, key); incrErr != nil {
+			allowed, err = limiter.Incr(ctx, key)
+			if err == ratelimit.ErrStoreUnavailable {
 				// fail-open on incr error
-				log.Printf("incr failed, ignoring: %v", incrErr)
+				log.Printf("incr failed, ignoring: %v", err)
+				allowed = true
 			}
-			fmt.Printf("attempt %d: bad password, counted\n", attempt)
+			fmt.Printf("attempt %d: bad password, counted (allowed=%v)\n", attempt, allowed)
 			continue
 		}
 
@@ -69,7 +76,21 @@ func main() {
 		fmt.Printf("attempt %d: LOGIN OK, counter reset\n", attempt)
 	}
 
-	// 5) After reset, the user is allowed again.
+	// 5) After exceeding MaxHits the key is banned for BanDuration.
+	//    Even a correct password will stay blocked until the ban expires.
+	fmt.Println("--- now in ban period ---")
 	allowed, _ := limiter.Check(ctx, key)
-	fmt.Printf("after reset, allowed=%v (expect true)\n", allowed)
+	fmt.Printf("banned, allowed=%v (expect false)\n", allowed)
+
+	// 6) Direct Set ban (optional): the Store.Set method can be used to start
+	//    a ban independent of Incr, e.g. after an admin action or anomaly
+	//    detection. Here we clear any existing state first to demonstrate it.
+	if resetErr := limiter.Reset(ctx, key); resetErr != nil {
+		log.Printf("reset failed: %v", resetErr)
+	}
+	if banErr := store.Set(ctx, "login:user:alice", 2*time.Minute); banErr != nil {
+		log.Printf("set ban failed: %v", banErr)
+	}
+	allowed, _ = limiter.Check(ctx, key)
+	fmt.Printf("after direct ban set, allowed=%v (expect false)\n", allowed)
 }
