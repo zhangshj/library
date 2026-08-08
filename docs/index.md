@@ -7,6 +7,7 @@
 | 组件 | 包路径 | 文档 | 示例 |
 | --- | --- | --- | --- |
 | **translate** | `pkg/translate` | [docs/translate/](docs/translate/) | [examples/translate/](examples/translate/) |
+| **ratelimit** | `pkg/ratelimit` | [docs/ratelimit/](docs/ratelimit/) | [examples/ratelimit/](examples/ratelimit/) |
 
 ### translate
 
@@ -19,3 +20,15 @@
 - 快速上手：[docs/translate/getting_started.md](docs/translate/getting_started.md)
 - 配置说明：[docs/translate/configuration.md](docs/translate/configuration.md)
 - 架构设计：[docs/translate/architecture.md](docs/translate/architecture.md)
+
+### ratelimit
+
+框架无关的固定窗口限流组件，支持内存 / Redis 双后端，用于登录类接口防爆破。
+
+- 接口定义：`pkg/ratelimit/interface.go`
+- 配置：`pkg/ratelimit/config.go`
+- 内存后端：`pkg/ratelimit/memory_store.go`
+- Redis 后端（Lua 原子计数）：`pkg/ratelimit/redis_store.go`
+- 快速上手：[docs/ratelimit/getting_started.md](docs/ratelimit/getting_started.md)
+- 配置说明：[docs/ratelimit/configuration.md](docs/ratelimit/configuration.md)
+- 架构设计：[docs/ratelimit/architecture.md](docs/ratelimit/architecture.md)
