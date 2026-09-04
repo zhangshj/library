@@ -16,6 +16,11 @@ func main() {
         tencent.DefaultConfig(),
         tencent.WithAPIKey(os.Getenv("TOKENHUB_API_KEY")),
         tencent.WithDomain("数据标注，智能驾驶，机器人"),
+        tencent.WithModels("hy-mt2-pro", "hy-mt2-plus", "hy-mt2-lite"),
+        tencent.WithModel("auto"),
+        tencent.WithModelObserver(func(model string) {
+            fmt.Printf("Tencent model: %s\n", model)
+        }),
     )
     if err != nil {
         log.Fatalf("init tencent translator failed: %v", err)
@@ -28,7 +33,7 @@ func main() {
         return
     }
 
-    texts := []string{"是", "12345", "你好"}
+    texts := []string{"一段完整的描述", "12345", "你好"}
     translatedBatch, err := client.TranslateBatch(ctx, texts, "zh", "en")
     if err != nil {
         log.Printf("tencent batch translate error: %v", err)
@@ -36,5 +41,5 @@ func main() {
     }
     fmt.Printf("Source:  %s\n", text)
     fmt.Printf("Result:  %s\n", translated)
-    fmt.Printf("Batch Result:  %v\n", translatedBatch)
+    fmt.Printf("Batch Result:  %+v\n", translatedBatch)
 }

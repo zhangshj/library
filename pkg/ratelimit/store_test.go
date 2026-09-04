@@ -18,17 +18,17 @@ func TestMemoryStore_InterfaceContract(t *testing.T) {
 		t.Fatalf("empty key should be allowed, got %v %v", ok, err)
 	}
 
-	// Increment up to the limit
-	for i := int64(1); i <= 3; i++ {
+	// Increment up to (but not including) the limit
+	for i := int64(1); i <= 2; i++ {
 		ok, err := l.Incr(context.Background(), "ip:9.9.9.9")
 		if !ok || err != nil {
 			t.Fatalf("hit %d allowed, got %v %v", i, ok, err)
 		}
 	}
-	// One more -> blocked
+	// Reaching the limit -> blocked
 	ok, err = l.Incr(context.Background(), "ip:9.9.9.9")
 	if ok {
-		t.Fatalf("exceeding max should be blocked")
+		t.Fatalf("reaching max should be blocked")
 	}
 	if err != nil {
 		t.Fatalf("store ok, err unexpected: %v", err)

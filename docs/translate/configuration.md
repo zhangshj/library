@@ -57,9 +57,11 @@ No default values or hardcoded secrets are provided in Config structs.
 | Name | Type | Required | Default | Security |
 | --- | --- | --- | --- | --- |
 | `APIKey` | `string` | Yes (via option) | — | **Sensitive — do not log** |
-| `Model` | `string` | No | `hy-mt2-plus` | Safe to log |
+| `Model` | `string` | No | `hy-mt2-plus` | Safe to log; use `auto` to select from `Models` |
+| `Models` | `[]string` | No | `[hy-mt2-plus]` | Safe to log; candidate models for `auto` |
 | `BaseURL` | `string` | No | `https://tokenhub.tencentmaas.com/v1` | Safe to log |
-| `Separator` | `string` | No | `<SEP>` | Safe to log |
+| `Separator` | `string` | No | `<SEP>` | Safe to log; legacy batch response fallback |
+| `ModelObserver` | `func(string)` | No | `nil` | Do not log credentials from the callback |
 | `Timeout` | `time.Duration` | No | `5s` | Safe to log |
 | `Region` | `string` | No | `cn-hangzhou` | Safe to log |
 
@@ -67,10 +69,14 @@ No default values or hardcoded secrets are provided in Config structs.
 
 - `tencent.WithAPIKey(apiKey string)` — injects TokenHub API Key at runtime.
 - `tencent.WithModel(model string)` — overrides translation model name.
+- `tencent.WithModels(models ...string)` — sets candidate models used by `ModelAuto`.
+- `tencent.WithModelObserver(func(model string))` — observes the actual model before each request, including retries.
 - `tencent.WithBaseURL(url string)` — overrides TokenHub API base URL.
 - `tencent.WithSeparator(sep string)` — overrides separator for batch translation.
 - `tencent.WithTimeout(d time.Duration)` — overrides HTTP timeout.
 - `tencent.WithRegion(region string)` — kept for compatibility, not used by TokenHub.
+
+Set `Model` to `tencent.ModelAuto` to enable automatic selection. A non-2xx response is retried once. In auto mode with multiple candidates, the retry switches to the next candidate model; otherwise the same model is retried.
 
 ## Security Recommendations
 

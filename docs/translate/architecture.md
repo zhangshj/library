@@ -39,7 +39,11 @@ pkg/translate/
 - **Alibaba Cloud**: Uses the native `GetBatchTranslate` API, which sends all texts in a single HTTP request. This avoids per-request rate limits and is the most efficient approach.
 - **Baidu Translate (General)**: Uses `\n` to join all texts into a single `q` parameter, sending one API call. The response returns an array of `trans_result` preserving input order.
 - **Baidu Translate (LLM)**: Uses `\n` to join all texts into a single `q` parameter, sending one API call for both Bearer and Sign auth modes. The response returns an array of `trans_result` preserving input order.
-- **Tencent Cloud TokenHub**: Uses `<SEP>` separator to join all texts into a single prompt, sending one Chat Completions API call. The response is split back into individual results preserving input order.
+- **Tencent Cloud TokenHub**: Sends each batch item as an indexed XML `<item>` in one Chat Completions prompt. The expected response is indexed XML, which preserves item boundaries and input order. The parser keeps `<SEP>` splitting as a compatibility fallback for older model responses.
+
+## Tencent Model Selection and Retry
+
+Tencent requests use the configured `Model`. When it is `auto`, one candidate from `Models` is selected for each request. Any non-2xx response is retried once; with multiple auto candidates, the retry uses the next candidate. `WithModelObserver` exposes the actual model before every request without forcing the library to write application logs.
 
 ## Extension Points
 
