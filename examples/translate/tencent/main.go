@@ -26,14 +26,14 @@ func main() {
         log.Fatalf("init tencent translator failed: %v", err)
     }
 
-    text := "是"
+    text := "一段完整的描述,,>fsdf怎么想的"
     translated, err := client.Translate(ctx, text, "zh", "en")
     if err != nil {
         log.Printf("tencent translate error: %v", err)
         return
     }
 
-    texts := []string{"一段完整的描述", "12345", "你好"}
+    texts := []string{"一段完整的描述,,>fsdf怎么想的", "12345", "你好"}
     translatedBatch, err := client.TranslateBatch(ctx, texts, "zh", "en")
     if err != nil {
         log.Printf("tencent batch translate error: %v", err)

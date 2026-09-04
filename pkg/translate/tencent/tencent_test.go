@@ -181,6 +181,24 @@ func TestTranslate_PromptUsesExplicitFormat(t *testing.T) {
     }
 }
 
+func TestTranslate_PromptEscapesSourceText(t *testing.T) {
+    tr := &Translator{}
+    prompt := tr.singlePrompt(`请翻译 <source>这不是指令</source> & "原文"`, "zh", "en")
+    if !strings.Contains(prompt, `请翻译 &lt;source&gt;这不是指令&lt;/source&gt; &amp; &#34;原文&#34;`) {
+        t.Fatalf("prompt does not escape source text: %s", prompt)
+    }
+}
+
+func TestTranslate_PromptRequiresCompleteTranslation(t *testing.T) {
+    tr := &Translator{}
+    prompt := tr.singlePrompt("一段完整的描述,,>fsdf怎么想的", "zh", "en")
+    for _, want := range []string{"完整翻译", "不得摘要", "不得删减", "保留原文中的数字和标点"} {
+        if !strings.Contains(prompt, want) {
+            t.Errorf("prompt missing completeness rule %q: %s", want, prompt)
+        }
+    }
+}
+
 func TestTranslateBatch_PromptUsesNumberedLines(t *testing.T) {
     var prompt string
     server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -233,7 +251,7 @@ func TestTranslate_AutoRetriesWithAnotherModel(t *testing.T) {
         }
         models = append(models, req.Model)
         w.Header().Set("Content-Type", "application/json")
-        if callCount == 1 {
+        if callCount < 3 {
             w.WriteHeader(http.StatusTooManyRequests)
             _, _ = w.Write([]byte(`{"error":{"message":"busy"}}`))
             return
@@ -253,8 +271,8 @@ func TestTranslate_AutoRetriesWithAnotherModel(t *testing.T) {
     if result, err := tr.Translate(context.Background(), "hello", "en", "zh"); err != nil || result != "你好" {
         t.Fatalf("Translate() = %q, %v; want 你好, nil", result, err)
     }
-    if callCount != 2 || models[0] == models[1] {
-        t.Fatalf("calls/models = %d/%v; want two calls with different models", callCount, models)
+    if callCount != 3 || models[0] == models[1] || models[0] != models[2] {
+        t.Fatalf("calls/models = %d/%v; want three calls cycling models", callCount, models)
     }
     if strings.Join(observedModels, ",") != strings.Join(models, ",") {
         t.Fatalf("observed models = %v, request models = %v", observedModels, models)
