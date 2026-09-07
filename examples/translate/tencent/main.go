@@ -26,7 +26,7 @@ func main() {
         log.Fatalf("init tencent translator failed: %v", err)
     }
 
-    text := "一段完整的描述,,>fsdf怎么想的"
+    text := "<translation>你好，世界！<\\/translation>"
     translated, err := client.Translate(ctx, text, "zh", "en")
     if err != nil {
         log.Printf("tencent translate error: %v", err)
