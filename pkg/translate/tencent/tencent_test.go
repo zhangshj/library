@@ -179,6 +179,12 @@ func TestTranslate_PromptUsesExplicitFormat(t *testing.T) {
             t.Errorf("prompt missing %q: %s", want, prompt)
         }
     }
+    if !strings.Contains(prompt, "输入：\n<source>hello</source>") {
+        t.Errorf("prompt should put source input on a new line: %s", prompt)
+    }
+    if !strings.HasSuffix(prompt, "</source>") {
+        t.Errorf("prompt should end at the source closing tag: %s", prompt)
+    }
 }
 
 func TestTranslate_PromptEscapesSourceText(t *testing.T) {
