@@ -174,7 +174,7 @@ func TestTranslate_PromptUsesExplicitFormat(t *testing.T) {
     if result != "你好" {
         t.Fatalf("result = %q, want 你好", result)
     }
-    for _, want := range []string{"<source>", "hello", "</source>", "仅输出译文纯文本", "不要输出任何 XML/HTML 标签"} {
+    for _, want := range []string{"<source>", "hello", "只是输入边界标记", "不要翻译、复制或输出这两个标签", "仅输出译文纯文本", "短词、短语或不完整句子只翻译其本身", "原文没有句末标点时", "不要输出任何 XML/HTML 标签"} {
         if !strings.Contains(prompt, want) {
             t.Errorf("prompt missing %q: %s", want, prompt)
         }
@@ -192,7 +192,7 @@ func TestTranslate_PromptEscapesSourceText(t *testing.T) {
 func TestTranslate_PromptRequiresCompleteTranslation(t *testing.T) {
     tr := &Translator{}
     prompt := tr.singlePrompt("一段完整的描述,,>fsdf怎么想的", "zh", "en")
-    for _, want := range []string{"完整翻译", "不得摘要", "不得删减", "保留原文中的数字和标点"} {
+    for _, want := range []string{"完整翻译", "不得摘要", "不得删减", "保留原文中的数字和标点", "原文没有句末标点时"} {
         if !strings.Contains(prompt, want) {
             t.Errorf("prompt missing completeness rule %q: %s", want, prompt)
         }
@@ -203,6 +203,31 @@ func TestParseSingleResponse_RemovesLeakedClosingTag(t *testing.T) {
     got := parseSingleResponse("Hello, world!</translation>")
     if got != "Hello, world!" {
         t.Fatalf("parseSingleResponse() = %q, want %q", got, "Hello, world!")
+    }
+}
+
+func TestParseSingleResponse_RemovesLeakedSourceTags(t *testing.T) {
+    got := parseSingleResponse("<source>Hello</source>")
+    if got != "Hello" {
+        t.Fatalf("parseSingleResponse() = %q, want %q", got, "Hello")
+    }
+}
+
+func TestParseSingleResponse_RemovesSourceTagsAndPreservesSuffix(t *testing.T) {
+    got := parseSingleResponse("<source>Smooth</source>.")
+    if got != "Smooth." {
+        t.Fatalf("parseSingleResponse() = %q, want %q", got, "Smooth.")
+    }
+}
+
+func TestTranslateBatch_RemovesLeakedSourceTags(t *testing.T) {
+    tr := &Translator{separator: DefaultSeparator}
+    got, err := tr.parseBatchResponse("你好<SEP>数字 12345<SEP><source>Hello</source>", 3)
+    if err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if got[2] != "Hello" {
+        t.Fatalf("third result = %q, want %q", got[2], "Hello")
     }
 }
 
@@ -243,6 +268,38 @@ func TestTranslateBatch_ParsesTaggedResponse(t *testing.T) {
     }
     if strings.Join(got, "|") != "你好|世界" {
         t.Fatalf("got %v, want [你好 世界]", got)
+    }
+}
+
+func TestTranslateBatch_FallsBackToSingleTranslations(t *testing.T) {
+    var callCount int
+    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        callCount++
+        w.Header().Set("Content-Type", "application/json")
+        content := "combined response without separators"
+        if callCount > 1 {
+            content = []string{"你好", "世界", "朋友"}[callCount-2]
+        }
+        _ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{Choices: []openai.ChatCompletionChoice{{Message: openai.ChatCompletionMessage{Content: content}}}})
+    }))
+    defer server.Close()
+
+    cfg := DefaultConfig()
+    cfg.BaseURL = server.URL + "/"
+    tr, err := New(cfg, WithAPIKey("test-key"))
+    if err != nil {
+        t.Fatalf("unexpected error creating client: %v", err)
+    }
+
+    got, err := tr.TranslateBatch(context.Background(), []string{"hello", "world", "friend"}, "en", "zh")
+    if err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if strings.Join(got, "|") != "你好|世界|朋友" {
+        t.Fatalf("got %v, want [你好 世界 朋友]", got)
+    }
+    if callCount != 4 {
+        t.Fatalf("call count = %d, want 4", callCount)
     }
 }
 
