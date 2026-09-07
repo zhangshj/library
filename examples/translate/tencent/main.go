@@ -26,14 +26,14 @@ func main() {
         log.Fatalf("init tencent translator failed: %v", err)
     }
 
-    text := "一段完整的描述,,>fsdf怎么想的"
+    text := "<translation>你好，世界！<\\/translation>"
     translated, err := client.Translate(ctx, text, "zh", "en")
     if err != nil {
         log.Printf("tencent translate error: %v", err)
         return
     }
 
-    texts := []string{"一段完整的描述,,>fsdf怎么想的", "12345", "你好"}
+    texts := []string{"一段完整的描述,,>fsdf怎么想的", "这是一段数字,12345", "你好,中国"}
     translatedBatch, err := client.TranslateBatch(ctx, texts, "zh", "en")
     if err != nil {
         log.Printf("tencent batch translate error: %v", err)
@@ -41,5 +41,9 @@ func main() {
     }
     fmt.Printf("Source:  %s\n", text)
     fmt.Printf("Result:  %s\n", translated)
-    fmt.Printf("Batch Result:  %+v\n", translatedBatch)
+    for i, t := range texts {
+        fmt.Printf("Source:  %s\n", t)
+        fmt.Printf("Result:  %s\n", translatedBatch[i])
+    }
+    //fmt.Printf("Batch Result:  %+v\n", translatedBatch)
 }

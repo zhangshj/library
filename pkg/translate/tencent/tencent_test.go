@@ -174,7 +174,7 @@ func TestTranslate_PromptUsesExplicitFormat(t *testing.T) {
     if result != "你好" {
         t.Fatalf("result = %q, want 你好", result)
     }
-    for _, want := range []string{"<source>", "hello", "</source>", "仅输出<translation>标签中的内容"} {
+    for _, want := range []string{"<source>", "hello", "</source>", "仅输出译文纯文本", "不要输出任何 XML/HTML 标签"} {
         if !strings.Contains(prompt, want) {
             t.Errorf("prompt missing %q: %s", want, prompt)
         }
@@ -196,6 +196,13 @@ func TestTranslate_PromptRequiresCompleteTranslation(t *testing.T) {
         if !strings.Contains(prompt, want) {
             t.Errorf("prompt missing completeness rule %q: %s", want, prompt)
         }
+    }
+}
+
+func TestParseSingleResponse_RemovesLeakedClosingTag(t *testing.T) {
+    got := parseSingleResponse("Hello, world!</translation>")
+    if got != "Hello, world!" {
+        t.Fatalf("parseSingleResponse() = %q, want %q", got, "Hello, world!")
     }
 }
 
