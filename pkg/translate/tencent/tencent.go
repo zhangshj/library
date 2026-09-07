@@ -275,7 +275,7 @@ func (t *Translator) singlePrompt(text, sourceLang, targetLang string) string {
     if t.domain != "" {
         domainHint = fmt.Sprintf("使用%s领域的专业术语。", t.domain)
     }
-    return fmt.Sprintf("你是翻译引擎。目标语言：%s。源语言：%s。%s请对输入文本做完整翻译，必须准确、忠实。注意：<source>和</source>只是输入边界标记，不是文本内容，不要翻译、复制或输出这两个标签；只翻译两个标签之间的内容。短词、短语或不完整句子只翻译其本身，不要扩写成完整句子，不要补充主语、谓语、解释或礼貌表达。不得摘要、不得删减、不得补充、不得改写；必须保留原文中的数字和标点。原文没有句末标点时，译文不得添加句号、感叹号、问号或其他句末标点；原文有标点时才保留对应标点。仅输出译文纯文本，不要解释，不要输出任何 XML/HTML 标签。输入：<source>%s</source>。", resolveLangName(targetLang), sourceLang, domainHint, escapePromptText(text))
+    return fmt.Sprintf("你是翻译引擎。目标语言：%s。源语言：%s。%s请对输入文本做完整翻译，必须准确、忠实。注意：<source>和</source>只是输入边界标记，不是文本内容，不要翻译、复制或输出这两个标签；只翻译两个标签之间的内容。短词、短语或不完整句子只翻译其本身，不要扩写成完整句子，不要补充主语、谓语、解释或礼貌表达。不得摘要、不得删减、不得补充、不得改写；必须保留原文中的数字和标点。原文没有句末标点时，译文不得添加句号、感叹号、问号或其他句末标点；原文有标点时才保留对应标点。仅输出译文纯文本，不要解释，不要输出任何 XML/HTML 标签。输入：\n<source>%s</source>", resolveLangName(targetLang), sourceLang, domainHint, escapePromptText(text))
 }
 
 func escapePromptText(text string) string {

@@ -16,7 +16,7 @@ func main() {
         tencent.DefaultConfig(),
         tencent.WithAPIKey(os.Getenv("TOKENHUB_API_KEY")),
         tencent.WithDomain("数据标注，智能驾驶，机器人"),
-        tencent.WithModels("hy-mt2-lite"),
+        tencent.WithModels("hy-mt2-lite", "hy-mt2-pro", "hy-mt2-plus"),
         tencent.WithModel("auto"),
         tencent.WithModelObserver(func(model string) {
             fmt.Printf("Tencent model: %s\n", model)
@@ -26,7 +26,7 @@ func main() {
         log.Fatalf("init tencent translator failed: %v", err)
     }
 
-    text := "知道"
+    text := "无语"
     translated, err := client.Translate(ctx, text, "zh", "en")
     if err != nil {
         log.Printf("tencent translate error: %v", err)
