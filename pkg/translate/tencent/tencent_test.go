@@ -220,6 +220,20 @@ func TestParseSingleResponse_RemovesSourceTagsAndPreservesSuffix(t *testing.T) {
     }
 }
 
+func TestParseSingleResponse_RemovesLeakedClosingSourceTag(t *testing.T) {
+    got := parseSingleResponse("Know</source>")
+    if got != "Know" {
+        t.Fatalf("parseSingleResponse() = %q, want %q", got, "Know")
+    }
+}
+
+func TestParseSingleResponse_PreservesNonTrailingSourceTag(t *testing.T) {
+    content := "Know</source> again"
+    if got := parseSingleResponse(content); got != content {
+        t.Fatalf("parseSingleResponse() = %q, want %q", got, content)
+    }
+}
+
 func TestTranslateBatch_RemovesLeakedSourceTags(t *testing.T) {
     tr := &Translator{separator: DefaultSeparator}
     got, err := tr.parseBatchResponse("你好<SEP>数字 12345<SEP><source>Hello</source>", 3)

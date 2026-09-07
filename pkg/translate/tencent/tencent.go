@@ -302,6 +302,7 @@ func parseSingleResponse(content string) string {
             trimmed = trimmed[len("<source>"):end] + trimmed[end+len(sourceEndTag):]
         }
     }
+    trimmed = strings.TrimSuffix(trimmed, "</source>")
     trimmed = strings.TrimSuffix(trimmed, "</translation>")
     return strings.TrimSpace(trimmed)
 }
