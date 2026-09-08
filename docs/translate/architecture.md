@@ -5,6 +5,7 @@
 - **Driver portability**: business code depends only on `Translator` interface, not on any cloud SDK.
 - **Credential isolation**: secrets are injected at runtime via Functional Options, never stored in serializable configs.
 - **Parallel evolution**: Alibaba Cloud, Baidu Translate, and Tencent Cloud drivers evolve independently without cross-dependencies.
+- **Centralized construction**: Application code can use `pkg/translate/factory` and depend only on the common interface while keeping provider-specific constructors available.
 
 ## Structure
 
@@ -12,6 +13,8 @@
 pkg/translate/
 ├── interface.go        # Translator interface (contract)
 ├── config.go           # Shared, non-sensitive defaults
+├── factory/
+│   └── factory.go      # Provider-aware constructor
 ├── aliyun/
 │   └── aliyun.go       # Alibaba Cloud alimt implementation
 ├── baidu/
@@ -33,6 +36,8 @@ pkg/translate/
 4. **Error wrapping**: All driver errors are wrapped with context using `fmt.Errorf("driver: %w", err)`, preserving the original error chain while adding provider identification.
 
 5. **Mock driver**: The mock driver provides a deterministic, zero-network implementation that enables unit testing of business logic without cloud dependencies.
+
+6. **Factory**: The factory keeps provider-specific credentials and options in provider-specific config blocks, preventing callers from depending on cloud SDK types.
 
 ## Batch Translation Strategy
 

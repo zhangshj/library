@@ -86,3 +86,20 @@ func main() {
 In `auto` mode, TokenHub selects one candidate model for each request. If a request returns a non-2xx response, it is retried once; the retry uses the next candidate model when multiple candidates are configured. The model observer is called before every actual request, including retries.
 
 See [configuration.md](configuration.md) for all options and [architecture.md](architecture.md) for design rationale.
+
+## Factory
+
+Use the factory when application code should depend only on the common translator interface:
+
+```go
+tr, err := factory.New(factory.Config{
+    Provider: factory.ProviderBaidu,
+    Baidu: &factory.BaiduConfig{
+        AppID: os.Getenv("BAIDU_APP_ID"),
+        APIKey: os.Getenv("BAIDU_API_KEY"),
+        SecretKey: os.Getenv("BAIDU_SECRET_KEY"),
+    },
+})
+```
+
+The provider-specific constructors remain available for advanced configuration.

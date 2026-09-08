@@ -16,6 +16,7 @@
 
 - 接口定义：`pkg/translate/interface.go`
 - 配置：`pkg/translate/config.go`
+- 工厂：`pkg/translate/factory`
 - 阿里云驱动：`pkg/translate/aliyun`
 - 腾讯云驱动：`pkg/translate/tencent`
 - 快速上手：[docs/translate/getting_started.md](docs/translate/getting_started.md)
