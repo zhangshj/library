@@ -3,7 +3,9 @@ package local
 import (
     "context"
     "strings"
+    "sync/atomic"
     "testing"
+    "time"
 
     "github.com/zhangshj/library/pkg/transcoder"
 )
@@ -73,6 +75,7 @@ func TestSubmitAndQuery(t *testing.T) {
     if err != nil {
         t.Fatalf("New() error = %v", err)
     }
+    defer tr.Close()
     id, err := tr.SubmitTask(context.Background(), transcoder.TranscodeRequest{
         SrcObject: "input.mp4", DstObject: "out/result.mp4",
         Template: transcoder.TranscodeTemplate{Name: "test", VideoCodec: "copy"},
@@ -80,8 +83,12 @@ func TestSubmitAndQuery(t *testing.T) {
     if err != nil {
         t.Fatalf("SubmitTask() error = %v", err)
     }
-    if id != "local-1" || runner.name != "ffmpeg" {
-        t.Fatalf("id/name = %q/%q", id, runner.name)
+    if id != "local-1" {
+        t.Fatalf("id = %q", id)
+    }
+    waitForState(t, tr, id, transcoder.TaskSuccess)
+    if runner.name != "ffmpeg" {
+        t.Fatalf("runner name = %q", runner.name)
     }
     result, err := tr.QueryTask(context.Background(), id)
     if err != nil {
@@ -95,15 +102,97 @@ func TestSubmitAndQuery(t *testing.T) {
 func TestSubmitFailure(t *testing.T) {
     runner := &fakeRunner{err: context.Canceled}
     tr, _ := New(Config{}, WithRunner(runner))
+    defer tr.Close()
     id, err := tr.SubmitTask(context.Background(), transcoder.TranscodeRequest{
         SrcObject: "input.mp4", DstObject: "out.mp4",
         Template: transcoder.TranscodeTemplate{Name: "test"},
     })
-    if err == nil || id != "local-1" {
+    if err != nil || id != "local-1" {
         t.Fatalf("id/error = %q/%v", id, err)
     }
-    result, queryErr := tr.QueryTask(context.Background(), id)
+    result := waitForState(t, tr, id, transcoder.TaskFailed)
+    _, queryErr := tr.QueryTask(context.Background(), id)
     if queryErr != nil || result.State != transcoder.TaskFailed {
         t.Fatalf("result/error = %+v/%v", result, queryErr)
     }
+}
+
+type concurrencyRunner struct {
+    started chan struct{}
+    release chan struct{}
+    active  int32
+    max     int32
+}
+
+func (r *concurrencyRunner) Run(_ context.Context, _ string, _ ...string) ([]byte, error) {
+    active := atomic.AddInt32(&r.active, 1)
+    for {
+        max := atomic.LoadInt32(&r.max)
+        if active <= max || atomic.CompareAndSwapInt32(&r.max, max, active) {
+            break
+        }
+    }
+    r.started <- struct{}{}
+    <-r.release
+    atomic.AddInt32(&r.active, -1)
+    return nil, nil
+}
+
+func TestMaxConcurrentLimitsWorkers(t *testing.T) {
+    runner := &concurrencyRunner{started: make(chan struct{}, 2), release: make(chan struct{}, 2)}
+    tr, err := New(Config{MaxConcurrent: 1, QueueSize: 2}, WithRunner(runner))
+    if err != nil {
+        t.Fatalf("New() error = %v", err)
+    }
+    defer tr.Close()
+    request := transcoder.TranscodeRequest{
+        SrcObject: "input.mp4", DstObject: "out.mp4",
+        Template: transcoder.TranscodeTemplate{Name: "test", VideoCodec: "copy"},
+    }
+    first, err := tr.SubmitTask(context.Background(), request)
+    if err != nil {
+        t.Fatalf("first SubmitTask() error = %v", err)
+    }
+    second, err := tr.SubmitTask(context.Background(), request)
+    if err != nil {
+        t.Fatalf("second SubmitTask() error = %v", err)
+    }
+    select {
+    case <-runner.started:
+    case <-time.After(time.Second):
+        t.Fatal("first task did not start")
+    }
+    if result, err := tr.QueryTask(context.Background(), second); err != nil || result.State != transcoder.TaskWaiting {
+        t.Fatalf("second task state/error = %s/%v, want Waiting/nil", result.State, err)
+    }
+    runner.release <- struct{}{}
+    select {
+    case <-runner.started:
+    case <-time.After(time.Second):
+        t.Fatal("second task did not start")
+    }
+    runner.release <- struct{}{}
+    waitForState(t, tr, first, transcoder.TaskSuccess)
+    waitForState(t, tr, second, transcoder.TaskSuccess)
+    if got := atomic.LoadInt32(&runner.max); got != 1 {
+        t.Fatalf("max concurrent runners = %d, want 1", got)
+    }
+}
+
+func waitForState(t *testing.T, tr *Transcoder, taskID string, want transcoder.TaskState) *transcoder.TranscodeResult {
+    t.Helper()
+    deadline := time.Now().Add(time.Second)
+    for time.Now().Before(deadline) {
+        result, err := tr.QueryTask(context.Background(), taskID)
+        if err != nil {
+            t.Fatalf("QueryTask() error = %v", err)
+        }
+        if result.State == want {
+            return result
+        }
+        time.Sleep(time.Millisecond)
+    }
+    result, _ := tr.QueryTask(context.Background(), taskID)
+    t.Fatalf("task %q state = %s, want %s", taskID, result.State, want)
+    return nil
 }

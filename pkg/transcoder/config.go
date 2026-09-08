@@ -26,6 +26,8 @@ type Config struct {
     WorkDir         string
     HardwareBackend string
     HardwareDevice  string
+    MaxConcurrent   int
+    QueueSize       int
 }
 
 // Validate checks the settings shared by the factory and drivers.

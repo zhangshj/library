@@ -32,29 +32,36 @@ type Config struct {
     WorkDir         string
     HardwareBackend string
     HardwareDevice  string
+    MaxConcurrent   int
+    QueueSize       int
 }
 
 // DefaultConfig returns a local configuration that uses ffmpeg from PATH.
-func DefaultConfig() Config { return Config{FFmpegPath: "ffmpeg"} }
+func DefaultConfig() Config {
+    return Config{FFmpegPath: "ffmpeg", MaxConcurrent: 1, QueueSize: 100}
+}
 
 // Option customizes a local transcoder.
-type Option func(*Translator)
+type Option func(*Transcoder)
 
 // WithRunner replaces the command runner, primarily for tests.
 func WithRunner(runner CommandRunner) Option {
-    return func(t *Translator) {
+    return func(t *Transcoder) {
         if runner != nil {
             t.runner = runner
         }
     }
 }
 
-// Translator is a synchronous local ffmpeg transcoder.
-type Translator struct {
+// Transcoder is a local ffmpeg transcoder with a bounded worker queue.
+type Transcoder struct {
     ffmpegPath string
     workDir    string
     hardware   hardwareConfig
     runner     CommandRunner
+    queue      chan queuedTask
+    stop       chan struct{}
+    workers    sync.WaitGroup
     sequence   uint64
     mu         sync.RWMutex
     templates  map[string]transcoder.TranscodeTemplate
@@ -62,7 +69,7 @@ type Translator struct {
 }
 
 // New creates a local ffmpeg transcoder.
-func New(cfg Config, opts ...Option) (*Translator, error) {
+func New(cfg Config, opts ...Option) (*Transcoder, error) {
     if cfg.FFmpegPath == "" {
         cfg.FFmpegPath = "ffmpeg"
     }
@@ -70,25 +77,43 @@ func New(cfg Config, opts ...Option) (*Translator, error) {
     if err != nil {
         return nil, err
     }
-    t := &Translator{
+    if cfg.MaxConcurrent <= 0 {
+        cfg.MaxConcurrent = 1
+    }
+    if cfg.QueueSize <= 0 {
+        cfg.QueueSize = 100
+    }
+    t := &Transcoder{
         ffmpegPath: cfg.FFmpegPath,
         workDir:    cfg.WorkDir,
         runner:     execRunner{},
         hardware:   hardware,
+        queue:      make(chan queuedTask, cfg.QueueSize),
+        stop:       make(chan struct{}),
         templates:  make(map[string]transcoder.TranscodeTemplate),
         tasks:      make(map[string]*transcoder.TranscodeResult),
     }
     for _, opt := range opts {
         opt(t)
     }
+    for i := 0; i < cfg.MaxConcurrent; i++ {
+        t.workers.Add(1)
+        go t.worker()
+    }
     return t, nil
 }
 
+// Close stops local workers after queued tasks finish.
+func (t *Transcoder) Close() {
+    close(t.stop)
+    t.workers.Wait()
+}
+
 // Name returns local.
-func (t *Translator) Name() string { return "local" }
+func (t *Transcoder) Name() string { return "local" }
 
 // CreatePreset stores a local profile for validation and reuse.
-func (t *Translator) CreatePreset(_ context.Context, tmpl transcoder.TranscodeTemplate) error {
+func (t *Transcoder) CreatePreset(_ context.Context, tmpl transcoder.TranscodeTemplate) error {
     if strings.TrimSpace(tmpl.Name) == "" {
         return fmt.Errorf("local: template name is required")
     }
@@ -98,49 +123,117 @@ func (t *Translator) CreatePreset(_ context.Context, tmpl transcoder.TranscodeTe
     return nil
 }
 
-// SubmitTask runs ffmpeg synchronously and records the completed task.
-func (t *Translator) SubmitTask(ctx context.Context, req transcoder.TranscodeRequest) (string, error) {
+// SubmitTask queues an ffmpeg task and returns before the conversion finishes.
+func (t *Transcoder) SubmitTask(ctx context.Context, req transcoder.TranscodeRequest) (string, error) {
     if req.SrcObject == "" || req.DstObject == "" {
         return "", fmt.Errorf("local: source and destination objects are required")
     }
     if err := t.CreatePreset(ctx, req.Template); err != nil {
         return "", err
     }
-    source := t.resolvePath(req.SrcBucket, req.SrcObject)
-    destination := t.resolvePath(req.DstBucket, req.DstObject)
-    if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-        return "", fmt.Errorf("local: create destination directory: %w", err)
+    if err := ctx.Err(); err != nil {
+        return "", fmt.Errorf("local: submit task context canceled: %w", err)
     }
-    args := buildFFmpegArgsWithHardware(source, destination, req.Template, t.hardware)
-    output, err := t.runner.Run(ctx, t.ffmpegPath, args...)
     id := "local-" + strconv.FormatUint(atomic.AddUint64(&t.sequence, 1), 10)
-    result := &transcoder.TranscodeResult{TaskID: id, Raw: string(output)}
+    task := queuedTask{id: id, ctx: ctx, request: req}
+    t.mu.Lock()
+    t.tasks[id] = &transcoder.TranscodeResult{TaskID: id, State: transcoder.TaskWaiting}
+    t.mu.Unlock()
+    select {
+    case t.queue <- task:
+        return id, nil
+    case <-ctx.Done():
+        t.mu.Lock()
+        delete(t.tasks, id)
+        t.mu.Unlock()
+        return "", fmt.Errorf("local: queue task: %w", ctx.Err())
+    case <-t.stop:
+        return "", fmt.Errorf("local: transcoder is closed")
+    }
+}
+
+type queuedTask struct {
+    id      string
+    ctx     context.Context
+    request transcoder.TranscodeRequest
+}
+
+func (t *Transcoder) worker() {
+    defer t.workers.Done()
+    for {
+        select {
+        case task := <-t.queue:
+            t.runTask(task)
+        case <-t.stop:
+            for {
+                select {
+                case task := <-t.queue:
+                    t.runTask(task)
+                default:
+                    return
+                }
+            }
+        }
+    }
+}
+
+func (t *Transcoder) runTask(task queuedTask) {
+    t.updateTask(task.id, func(result *transcoder.TranscodeResult) {
+        result.State = transcoder.TaskRunning
+    })
+    source := t.resolvePath(task.request.SrcBucket, task.request.SrcObject)
+    destination := t.resolvePath(task.request.DstBucket, task.request.DstObject)
+    if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+        t.failTask(task.id, fmt.Errorf("local: create destination directory: %w", err))
+        return
+    }
+    args := buildFFmpegArgsWithHardware(source, destination, task.request.Template, t.hardware)
+    output, err := t.runner.Run(task.ctx, t.ffmpegPath, args...)
     if err != nil {
-        result.State = transcoder.TaskFailed
-        result.ErrMsg = strings.TrimSpace(string(output))
-    } else {
+        resultErr := fmt.Errorf("local: ffmpeg failed: %w", err)
+        t.updateTask(task.id, func(result *transcoder.TranscodeResult) {
+            result.State = transcoder.TaskFailed
+            result.ErrMsg = strings.TrimSpace(string(output))
+            result.Raw = string(output)
+            if result.ErrMsg == "" {
+                result.ErrMsg = resultErr.Error()
+            }
+        })
+        return
+    }
+    t.updateTask(task.id, func(result *transcoder.TranscodeResult) {
         result.State = transcoder.TaskSuccess
         result.OutputURL = fileURL(destination)
-    }
+        result.Raw = string(output)
+    })
+}
+
+func (t *Transcoder) updateTask(id string, update func(*transcoder.TranscodeResult)) {
     t.mu.Lock()
-    t.tasks[id] = result
-    t.mu.Unlock()
-    if err != nil {
-        return id, fmt.Errorf("local: ffmpeg failed: %w", err)
+    defer t.mu.Unlock()
+    if result, ok := t.tasks[id]; ok {
+        update(result)
     }
-    return id, nil
+}
+
+func (t *Transcoder) failTask(id string, err error) {
+    t.updateTask(id, func(result *transcoder.TranscodeResult) {
+        result.State = transcoder.TaskFailed
+        result.ErrMsg = err.Error()
+    })
 }
 
 // QueryTask returns the result recorded by the synchronous local task.
-func (t *Translator) QueryTask(_ context.Context, taskID string) (*transcoder.TranscodeResult, error) {
+func (t *Transcoder) QueryTask(_ context.Context, taskID string) (*transcoder.TranscodeResult, error) {
     t.mu.RLock()
     result, ok := t.tasks[taskID]
-    t.mu.RUnlock()
-    if !ok {
-        return nil, fmt.Errorf("local: task %q not found", taskID)
+    if ok {
+        copy := *result
+        t.mu.RUnlock()
+        return &copy, nil
     }
-    copy := *result
-    return &copy, nil
+    t.mu.RUnlock()
+    return nil, fmt.Errorf("local: task %q not found", taskID)
 }
 
 func localPath(bucket, object string) string {
@@ -150,7 +243,7 @@ func localPath(bucket, object string) string {
     return filepath.Join(bucket, object)
 }
 
-func (t *Translator) resolvePath(bucket, object string) string {
+func (t *Transcoder) resolvePath(bucket, object string) string {
     path := localPath(bucket, object)
     if t.workDir != "" && !filepath.IsAbs(path) {
         return filepath.Join(t.workDir, path)

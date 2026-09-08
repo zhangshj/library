@@ -29,6 +29,8 @@ func New(cfg transcoder.Config) (transcoder.Transcoder, error) {
             WorkDir:         cfg.WorkDir,
             HardwareBackend: cfg.HardwareBackend,
             HardwareDevice:  cfg.HardwareDevice,
+            MaxConcurrent:   cfg.MaxConcurrent,
+            QueueSize:       cfg.QueueSize,
         })
     case transcoder.ProviderTencent:
         return tencent.New(tencent.Config{BucketURL: cfg.BucketURL, SecretID: cfg.AccessKey, SecretKey: cfg.SecretKey})
