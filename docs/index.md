@@ -8,6 +8,7 @@
 | --- | --- | --- | --- |
 | **translate** | `pkg/translate` | [docs/translate/](docs/translate/) | [examples/translate/](examples/translate/) |
 | **ratelimit** | `pkg/ratelimit` | [docs/ratelimit/](docs/ratelimit/) | [examples/ratelimit/](examples/ratelimit/) |
+| **transcoder** | `pkg/transcoder` | [docs/transcoder/](docs/transcoder/) | [examples/transcoder/](examples/transcoder/) |
 
 ### translate
 
@@ -32,3 +33,17 @@
 - 快速上手：[docs/ratelimit/getting_started.md](docs/ratelimit/getting_started.md)
 - 配置说明：[docs/ratelimit/configuration.md](docs/ratelimit/configuration.md)
 - 架构设计：[docs/ratelimit/architecture.md](docs/ratelimit/architecture.md)
+
+### transcoder
+
+统一媒体转码封装，支持本地 ffmpeg、阿里云 MTS 和腾讯云 CI。
+
+- 接口定义：`pkg/transcoder/interface.go`
+- 配置：`pkg/transcoder/config.go`
+- 阿里云驱动：`pkg/transcoder/aliyun`
+- 本地驱动：`pkg/transcoder/local`
+- 腾讯云驱动：`pkg/transcoder/tencent`
+- 工厂：`pkg/transcoder/factory`
+- 快速上手：[docs/transcoder/getting_started.md](docs/transcoder/getting_started.md)
+- 配置说明：[docs/transcoder/configuration.md](docs/transcoder/configuration.md)
+- 架构设计：[docs/transcoder/architecture.md](docs/transcoder/architecture.md)
