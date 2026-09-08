@@ -35,6 +35,23 @@ func TestBuildFFmpegArgs(t *testing.T) {
     }
 }
 
+func TestBuildFFmpegArgs_AutoWidth(t *testing.T) {
+    args := buildFFmpegArgs("in.mp4", "out.mp4", transcoder.TranscodeTemplate{Height: 720})
+    joined := strings.Join(args, " ")
+    if !strings.Contains(joined, "-vf scale=-2:720") {
+        t.Fatalf("args %q missing aspect-preserving auto width", joined)
+    }
+}
+
+func TestBuildFFmpegArgs_PreservesSourceFPS(t *testing.T) {
+    args := buildFFmpegArgs("in.mp4", "out.mp4", transcoder.TranscodeTemplate{Height: 720})
+    for i, arg := range args {
+        if arg == "-r" {
+            t.Fatalf("args %v unexpectedly contains -r at index %d", args, i)
+        }
+    }
+}
+
 func TestBuildHardwareFFmpegArgs(t *testing.T) {
     tests := []struct {
         name   string
